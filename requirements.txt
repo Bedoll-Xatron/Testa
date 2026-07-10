@@ -1,0 +1,11 @@
+python-telegram-bot==21.0
+pykrx
+pandas
+requests
+python-dotenv
+apscheduler
+beautifulsoup4
+lxml
+pytz
+google-genai
+holidays
