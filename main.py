@@ -101,7 +101,7 @@ class KRXTrader:
         self.scheduler.start()
 
         async def _signal_cmd(update, context):
-            await self.signal_bot.send_daily_signal(context)
+            await self.signal_bot.send_daily_signal(context, update=update)
 
         async def _error_handler(update, context):
             err = context.error

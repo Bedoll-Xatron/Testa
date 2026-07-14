@@ -1,0 +1,5 @@
+# AI Assistant Directives
+
+## 1. 작업 폴더 격리 (Directory Restriction)
+**CRITICAL**: 앞으로 모든 코딩, 파일 수정, 파일 검색 및 분석 작업은 오직 **`d:\Project2026\TESTA`** 폴더 내에서만 진행해야 합니다.
+사용자의 명시적인 지시가 없는 한 `15N90`, `autostock` 등 다른 폴더의 파일이나 코드를 섞어 쓰거나 참조하지 마십시오. 이 프로젝트는 완전히 독립적으로 유지되어야 합니다.

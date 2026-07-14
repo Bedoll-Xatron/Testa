@@ -22,5 +22,7 @@ class Config:
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
     GEMINI_BASIC_MODEL = os.getenv('GEMINI_BASIC_MODEL', 'gemini-1.5-flash')
     GEMINI_BOSS_MODEL = os.getenv('GEMINI_BOSS_MODEL', 'gemini-1.5-pro')
+    NVIDIA_API_KEY = os.getenv('NVIDIA_API_KEY')
+    NVIDIA_MODEL = os.getenv('NVIDIA_MODEL', 'meta/llama-3.1-70b-instruct')
     HOLIDAY_API_KEY = os.getenv('HOLIDAY_API_KEY')
 config = Config()

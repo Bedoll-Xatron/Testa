@@ -2,7 +2,7 @@ import pandas as pd
 from pykrx import stock
 from datetime import datetime, timedelta
 import time
-from google import genai
+import time
 from live.broker_kis import KISBroker
 from config import config
 from strategy.historical_tester import run_10y_backtest
@@ -12,9 +12,13 @@ class TestaScorer:
     def __init__(self):
         self.broker = KISBroker()
         
-        # Gemini 설정
-        if config.GEMINI_API_KEY:
-            self.client = genai.Client(api_key=config.GEMINI_API_KEY)
+        # NVIDIA NIM 설정
+        if getattr(config, 'NVIDIA_API_KEY', None):
+            from openai import OpenAI
+            self.client = OpenAI(
+                base_url="https://integrate.api.nvidia.com/v1",
+                api_key=config.NVIDIA_API_KEY
+            )
         else:
             self.client = None
             
@@ -216,7 +220,7 @@ class TestaScorer:
                     chart_reason=pick['reason']
                 )
                 
-                if ai_eval['decision'] == 'BUY':
+                if ai_eval['decision'] in ['STRONG BUY', 'BUY'] and ai_eval['confidence'] >= 70:
                     pick['ai_confidence'] = ai_eval['confidence']
                     pick['ai_reason'] = ai_eval['reason']
                     final_picks.append(pick)
@@ -270,7 +274,7 @@ class TestaScorer:
             else:
                 report += f"⚠️ **'조건 미달'**입니다. 아직 세력의 확고한 지지(VWAP 근접 및 보조지표 턴어라운드)가 보이지 않습니다.\n\n"
                 
-            # Gemini AI 코멘트 추가
+            # NVIDIA AI 코멘트 추가
             if self.client:
                 prompt = f"""
                 당신은 20년차 주식 단타 트레이더이자 1천억 단타 천재의 'VWAP 실전 매매법' 신봉자입니다.
@@ -284,11 +288,11 @@ class TestaScorer:
                 위 지표를 보고, 이 종목이 현재 장중 진입하기에 적합한 눌림목 타점인지 3줄 이내로 프로페셔널하게 분석해주세요.
                 """
                 try:
-                    response = self.client.models.generate_content(
-                        model=config.GEMINI_BASIC_MODEL,
-                        contents=prompt
+                    response = self.client.chat.completions.create(
+                        model=getattr(config, 'NVIDIA_MODEL', 'meta/llama-3.1-70b-instruct'),
+                        messages=[{"role":"user","content":prompt}]
                     )
-                    report += f"🤖 **AI(Gemini) 트레이딩 뷰**\n{response.text.strip()}"
+                    report += f"🤖 **AI(NVIDIA) 트레이딩 뷰**\n{response.choices[0].message.content.strip()}"
                 except Exception as e:
                     report += f"🤖 **AI 분석 오류**: {str(e)}"
                     

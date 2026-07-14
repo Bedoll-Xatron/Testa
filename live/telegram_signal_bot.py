@@ -37,17 +37,33 @@ class SignalBot:
             return kospi['Close'].iloc[-1] > kospi['Close'].rolling(60).mean().iloc[-1]
         except Exception:
             return True # 조회 실패 시 기본값으로 True 반환하여 스캔 진행
-    async def send_daily_signal(self,context=None):
+    async def send_daily_signal(self,context=None, update=None):
         bot = context.bot if context else self.app.bot
         
         # 한국 공휴일 및 주말 휴장일 스킵
         from utils.holiday import is_market_open
         if not is_market_open():
+            if update:
+                await update.message.reply_text("오늘은 휴장일입니다.")
             return
             
-        available_cash = self.broker.get_available_cash()
-        buys = self.scorer.scan_market(total_capital=available_cash, max_picks=5)
+        wait_msg = None
+        if update:
+            wait_msg = await update.message.reply_text("🔄 시장 스캔 및 AI(NVIDIA 70B) 분석 중입니다... (최대 1~3분 소요)")
+            
+        def _get_cash():
+            return self.broker.get_available_cash()
+            
+        available_cash = await asyncio.to_thread(_get_cash)
+        
+        def _scan():
+            return self.scorer.scan_market(total_capital=available_cash, max_picks=5)
+            
+        buys = await asyncio.to_thread(_scan)
+        
         if not buys: 
+            if wait_msg:
+                await wait_msg.edit_text("❌ 조건에 맞는 종목이 없어 매수를 진행하지 않습니다.")
             return
             
         msg = "🤖 [자동 매수 완료]\n\n"
@@ -56,7 +72,10 @@ class SignalBot:
         for b in buys:
             try:
                 self.risk.check_pre_trade(b['ticker'])
-                res = self.broker.send_order(b['ticker'], b['qty'])
+                def _order():
+                    return self.broker.send_order(b['ticker'], b['qty'])
+                res = await asyncio.to_thread(_order)
+                
                 if res['success']:
                     msg += f"✅ {b['name']} {b['qty']}주 (단가: {b['price']:,}원)\n"
                     if 'ai_reason' in b:
@@ -66,7 +85,13 @@ class SignalBot:
                 pass
                 
         if bought_count > 0:
-            await bot.send_message(config.TELEGRAM_CHAT_ID, msg)
+            if wait_msg:
+                await wait_msg.edit_text(msg)
+            else:
+                await bot.send_message(config.TELEGRAM_CHAT_ID, msg)
+        else:
+            if wait_msg:
+                await wait_msg.edit_text("❌ 종목을 찾았으나 매수 주문에 실패했습니다.")
     async def button_handler(self,update,context):
         q=update.callback_query
         try:
