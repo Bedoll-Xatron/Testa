@@ -9,7 +9,10 @@ class AITradingAgent:
     def __init__(self):
         self.api_key = getattr(config, 'NVIDIA_API_KEY', None)
         self.client = OpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=self.api_key) if self.api_key else None
-        self.model_name = getattr(config, 'NVIDIA_MODEL', 'meta/llama-3.1-70b-instruct')
+        
+        self.primary_model = "meta/llama-3.1-70b-instruct"
+        self.fallback_model = "meta/llama-3.1-70b-instruct"
+        self.current_model = self.primary_model
         
     def evaluate_stock(self, ticker: str, name: str, current_price: int, chart_reason: str) -> dict:
         """뉴스 및 공시 데이터를 바탕으로 2차 필터링(Veto)을 수행하여 최종 매수 여부를 결정합니다."""
@@ -52,32 +55,46 @@ class AITradingAgent:
         }}
         """
         
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg}
+        ]
+        
         try:
             response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": user_msg}
-                ]
+                model=self.current_model,
+                messages=messages
             )
-            
             text = response.choices[0].message.content.strip()
-            # JSON 포맷이 마크다운(```)으로 감싸진 경우를 처리
             text = re.sub(r'```[a-zA-Z]*', '', text).replace('```', '').strip()
-            
             result = json.loads(text)
             
-            decision = result.get('decision', 'BUY').upper()
-            confidence = int(result.get('confidence', 50))
-            reason = result.get('reason', '분석 사유 파싱 실패')
-            
-            # 응답 검증
-            if decision not in ["STRONG BUY", "BUY", "HOLD", "PASS"]:
-                decision = "PASS"
-                
-            return {"decision": decision, "confidence": confidence, "reason": reason}
-            
         except Exception as e:
-            logger.error(f"[{ticker}] AI 에이전트 분석 중 오류 발생: {e}")
-            # 에러 시 차트 알고리즘 결과를 신뢰하여 매수 진행
-            return {"decision": "BUY", "confidence": 100, "reason": "AI 분석 실패로 차트 알고리즘 채택"}
+            logger.warning(f"[{ticker}] {self.current_model} 분석 중 오류(또는 토큰 에러) 발생: {e}. 대체 모델로 전환합니다.")
+            # 에러 발생 시 수시로 모델 스왑
+            if self.current_model == self.primary_model:
+                self.current_model = self.fallback_model
+            else:
+                self.current_model = self.primary_model
+                
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.current_model,
+                    messages=messages
+                )
+                text = response.choices[0].message.content.strip()
+                text = re.sub(r'```[a-zA-Z]*', '', text).replace('```', '').strip()
+                result = json.loads(text)
+                
+            except Exception as e2:
+                logger.error(f"[{ticker}] 대체 모델({self.current_model}) 분석 중 오류 발생: {e2}")
+                return {"decision": "BUY", "confidence": 100, "reason": "AI 분석(두 모델 모두) 실패로 차트 알고리즘 채택"}
+                
+        decision = result.get('decision', 'BUY').upper()
+        confidence = int(result.get('confidence', 50))
+        reason = result.get('reason', '분석 사유 파싱 실패')
+        
+        if decision not in ["STRONG BUY", "BUY", "HOLD", "PASS"]:
+            decision = "PASS"
+            
+        return {"decision": decision, "confidence": confidence, "reason": reason}

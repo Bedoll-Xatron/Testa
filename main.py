@@ -115,8 +115,8 @@ class KRXTrader:
         async def _status_cmd(update, context):
             now = datetime.now(pytz.timezone('Asia/Seoul'))
             uptime = now - self._started_at
-            h, rem = divmod(int(uptime.total_seconds()), 3600)
-            m, s = divmod(rem, 60)
+            uptime_h, rem = divmod(int(uptime.total_seconds()), 3600)
+            uptime_m, uptime_s = divmod(rem, 60)
 
             jobs = self.scheduler.get_jobs()
             next_runs = []
@@ -128,25 +128,80 @@ class KRXTrader:
 
             try:
                 cash = self.broker.get_available_cash()
-                holdings = [h for h in (self.broker.get_balance() or []) if int(h.get('hldg_qty', 0)) > 0]
-                cash_line = f"예수금: {cash:,}원\n보유종목: {len(holdings)}개"
-                
                 if getattr(config, 'PAPER_TRADING_MODE', False) and hasattr(self.broker, 'get_win_rate_stats'):
-                    stats = self.broker.get_win_rate_stats()
-                    cash_line += f"\n📊 가상매매 승률: {stats['win_rate']:.1f}% ({stats['total_trades']}전 | 평균 {stats['avg_pnl']:+.2f}%)"
+                    wrs = self.broker.get_win_rate_stats()
+                    cash_extra = f"\n📊 가상매매 승률: {wrs['win_rate']:.1f}% ({wrs['total_trades']}전 | 평균 {wrs['avg_pnl']:+.2f}%)"
+                else:
+                    cash_extra = ""
             except Exception:
-                cash_line = "잔고 조회 실패"
+                cash = 0
+                cash_extra = ""
+
+            # 보유 종목별 상세 + 미실현 손익 합산
+            holdings_detail = ""
+            unrealized_pnl = 0
+            unrealized_invested = 0
+            try:
+                raw_holdings = [hd for hd in (self.broker.get_balance() or []) if int(hd.get('hldg_qty', 0)) > 0]
+                if raw_holdings:
+                    holdings_detail = "\n━━━━━━━━━━━━━━━\n📦 보유 종목 현황\n"
+                    for hd in raw_holdings:
+                        ticker = hd['pdno']
+                        name = hd.get('prdt_name', stock.get_market_ticker_name(ticker)) or ticker
+                        qty = int(hd['hldg_qty'])
+                        avg_price = float(hd['pchs_avg_pric'])
+                        cur_price = self.broker.get_current_price(ticker) or avg_price
+                        pnl_amt = (cur_price - avg_price) * qty
+                        pnl_pct = (cur_price / avg_price - 1) * 100
+                        unrealized_pnl += pnl_amt
+                        unrealized_invested += avg_price * qty
+                        icon = "🔴" if pnl_pct >= 0 else "🔵"
+                        holdings_detail += (
+                            f"  {icon} {name}({ticker})\n"
+                            f"     {qty}주 | 평균 {avg_price:,.0f}원 → {cur_price:,.0f}원\n"
+                            f"     손익: {pnl_amt:+,.0f}원 ({pnl_pct:+.2f}%)\n"
+                        )
+                else:
+                    holdings_detail = "\n━━━━━━━━━━━━━━━\n📦 보유 종목 없음"
+            except Exception as e:
+                holdings_detail = f"\n📦 보유 종목 조회 실패: {e}"
+
+            # 총 투자 성과: 초기 원금 vs 현재 총 평가자산 직접 비교
+            try:
+                initial_capital = getattr(config, 'PAPER_INITIAL_CASH', 0)
+                current_total = self.broker.get_total_capital()  # 현금 + 보유종목 평가액 합산
+                total_pnl = current_total - initial_capital
+                roi = (total_pnl / initial_capital * 100) if initial_capital > 0 else 0.0
+                pnl_icon = "📈" if total_pnl >= 0 else "📉"
+                
+                # 실현/미실현 세부 내역
+                stats = self.risk.get_overall_stats()
+                perf_line = (
+                    f"━━━━━━━━━━━━━━━\n"
+                    f"📊 투자 성과 (원금 대비)\n"
+                    f"  초기 원금: {initial_capital:,.0f}원\n"
+                    f"  현재 총 평가: {current_total:,.0f}원\n"
+                    f"  {pnl_icon} 총 손익: {total_pnl:+,.0f}원 ({roi:+.2f}%)\n"
+                    f"  ├ 미실현: {unrealized_pnl:+,.0f}원\n"
+                    f"  └ 실현({stats['total_trades']}건·승률{stats['win_rate']:.0f}%): {stats['total_pnl']:+,.0f}원"
+                )
+            except Exception as e:
+                perf_line = f"📊 성과 조회 실패: {e}"
+
 
             msg = (
                 f"🤖 TESTA 봇 상태\n"
                 f"━━━━━━━━━━━━━━━\n"
-                f"가동시간: {h}시간 {m}분 {s}초\n"
+                f"가동시간: {uptime_h}시간 {uptime_m}분 {uptime_s}초\n"
                 f"서버시각: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"{cash_line}\n"
+                f"예수금: {cash:,}원{cash_extra}\n"
+                f"{perf_line}"
+                f"{holdings_detail}\n"
                 f"━━━━━━━━━━━━━━━\n"
                 f"다음 스케줄:\n" + "\n".join(next_runs or ["  (없음)"])
             )
             await update.message.reply_text(msg)
+
 
         async def _balance_cmd(update, context):
             wait_msg = await update.message.reply_text("🔄 증권사 API 실시간 잔고/단가 조회 중입니다...\n(종목 수에 따라 최대 10초 정도 소요될 수 있습니다)")

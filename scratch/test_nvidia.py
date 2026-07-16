@@ -14,7 +14,8 @@ models_to_test = [
     "nvidia/llama-3.1-nemotron-70b-instruct",
     "meta/llama-3.1-70b-instruct",
     "meta/llama3-70b-instruct",
-    "nvidia/nemotron-4-340b-instruct"
+    "nvidia/nemotron-4-340b-instruct",
+    "meta/llama-3.1-405b-instruct"
 ]
 
 for model in models_to_test:

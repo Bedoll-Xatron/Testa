@@ -12,7 +12,6 @@ class TestaScorer:
     def __init__(self):
         self.broker = KISBroker()
         
-        # NVIDIA NIM 설정
         if getattr(config, 'NVIDIA_API_KEY', None):
             from openai import OpenAI
             self.client = OpenAI(
@@ -21,6 +20,10 @@ class TestaScorer:
             )
         else:
             self.client = None
+            
+        self.primary_model = "meta/llama-3.1-70b-instruct"
+        self.fallback_model = "meta/llama-3.1-70b-instruct"
+        self.current_model = self.primary_model
             
         # 전략 가중치 및 설정 파라미터
         self.config = {
@@ -289,12 +292,25 @@ class TestaScorer:
                 """
                 try:
                     response = self.client.chat.completions.create(
-                        model=getattr(config, 'NVIDIA_MODEL', 'meta/llama-3.1-70b-instruct'),
+                        model=self.current_model,
                         messages=[{"role":"user","content":prompt}]
                     )
                     report += f"🤖 **AI(NVIDIA) 트레이딩 뷰**\n{response.choices[0].message.content.strip()}"
                 except Exception as e:
-                    report += f"🤖 **AI 분석 오류**: {str(e)}"
+                    logger.warning(f"[{ticker}] {self.current_model} 분석 중 오류: {e}. 대체 모델로 전환합니다.")
+                    if self.current_model == self.primary_model:
+                        self.current_model = self.fallback_model
+                    else:
+                        self.current_model = self.primary_model
+                        
+                    try:
+                        response = self.client.chat.completions.create(
+                            model=self.current_model,
+                            messages=[{"role":"user","content":prompt}]
+                        )
+                        report += f"🤖 **AI(NVIDIA) 트레이딩 뷰**\n{response.choices[0].message.content.strip()}"
+                    except Exception as e2:
+                        report += f"🤖 **AI 분석 오류**: 두 모델 모두 실패했습니다 ({str(e2)})"
                     
             return report
         except Exception as e:
